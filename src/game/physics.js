@@ -1,67 +1,79 @@
-// -------------------------------------------------------------
-// physics.js
-// Main disc flight simulation engine.
-// Uses character stats, disc stats, weather, hazards, and chaos.
-// -------------------------------------------------------------
+// physics.js — AFTER PATCH 1 (v1.1.0)
 
-import gameConfig from "../config/gameConfig.js";
-import { checkHazards } from "./hazards.js";
+import { applySkillsToThrow } from "../advanced/skillSystem.js";
+import { applyClassModifiers } from "../advanced/characterClasses.js";
 
 export function simulateThrow(character, disc, style, env, power, distanceRemaining) {
-  // ---------------------------------------------------------
-  // BASE DISTANCE CALCULATION
-  // ---------------------------------------------------------
-  let distance =
-    character.stats.STR * gameConfig.throw.strengthMultiplier +
-    character.stats.SPD * gameConfig.throw.speedMultiplier +
-    disc.speed * (power / 100) * 14 + // disc power scaling
-    disc.glide * gameConfig.throw.glideMultiplier;
 
-  // Apply throwing style multiplier
-  if (style.powerMultiplier)
-    distance *= style.powerMultiplier;
+  // -----------------------------------------
+  // BASE CALCULATIONS (ORIGINAL LOGIC)
+  // -----------------------------------------
 
-  // ---------------------------------------------------------
-  // ENVIRONMENT MODIFIERS
-  // ---------------------------------------------------------
-  if (env.windSpeed > 15) distance -= 15; // strong headwind
-  if (env.windSpeed < 5)  distance += 5; // calm conditions help
+  // Base driving distance formula
+  let baseDistance = (disc.speed * power) * 0.35;
 
-  if (env.rainIntensity > 0.6)
-    distance *= 0.9; // wet conditions reduce flight
+  // Glide increases flight time (realistic)
+  baseDistance += disc.glide * 3;
 
-  // ---------------------------------------------------------
-  // ACCURACY CALCULATION
-  // ---------------------------------------------------------
-  let accuracy = character.stats.TEC * 10;
+  // Natural throw deviation (left/right)
+  let deviation = (Math.random() * 10) - 5;
 
-  // Style-based accuracy tradeoffs
-  if (style.accuracyPenalty)
-    accuracy -= style.accuracyPenalty;
+  // Wind adjustment
+  let effectiveWind = env.windSpeed;
+  if (env.windDir === "headwind") baseDistance -= env.windSpeed * 1.5;
+  if (env.windDir === "tailwind") baseDistance += env.windSpeed * 1.2;
+  if (env.windDir === "left") deviation += env.windSpeed * 0.4;
+  if (env.windDir === "right") deviation -= env.windSpeed * 0.4;
 
-  // Chaos factor influenced by Focus
-  accuracy += (Math.random() * gameConfig.throw.chaosFactor - (gameConfig.throw.chaosFactor / 2))
-             * (1 - character.stats.FOC / 10);
+  // Throwing style modifier
+  baseDistance *= style.powerMultiplier;
+  deviation += style.accuracyPenalty;
 
-  // Clamp accuracy to valid range
-  accuracy = Math.max(-30, Math.min(100, accuracy));
+  // Baseline hazard probability
+  let hazardChance = 0.10;
 
-  // ---------------------------------------------------------
-  // HAZARDS
-  // ---------------------------------------------------------
-  const hazards = checkHazards(distanceRemaining, accuracy, env, env.courseName);
 
-  // Apply hazard effects to distance
-  for (const h of hazards) {
-    if (h.effect) distance += h.effect;
-  }
+  // -----------------------------------------
+  // PATCH 1 — SKILLS + CLASS MODIFIERS
+  // -----------------------------------------
+  let physicsParams = {};
 
-  // Minimum distance floor
-  distance = Math.max(5, distance);
+  // Apply skill system modifications
+  physicsParams = applySkillsToThrow(character, physicsParams);
+
+  // Apply class system modifications
+  physicsParams = applyClassModifiers(character, physicsParams);
+
+  // Distance scaling (+distanceBonus)
+  if (physicsParams.distanceBonus)
+    baseDistance *= physicsParams.distanceBonus;
+
+  // Accuracy reduction (− deviation)
+  if (physicsParams.accuracyBonus)
+    deviation -= physicsParams.accuracyBonus;
+
+  // Better angle control (reduces release error)
+  if (physicsParams.angleVarianceReduction)
+    deviation -= physicsParams.angleVarianceReduction;
+
+  // Reduce wind effects
+  if (physicsParams.windReduction)
+    effectiveWind -= physicsParams.windReduction;
+
+  // Hazard suppression (realistic awareness training)
+  if (physicsParams.hazardReduction)
+    hazardChance *= physicsParams.hazardReduction;
+
+
+  // -----------------------------------------
+  // FINAL THROW OUTPUT
+  // -----------------------------------------
 
   return {
-    distance: Math.floor(distance),
-    accuracy: Math.floor(accuracy),
-    hazards
+    distance: Math.floor(baseDistance),
+    deviation,
+    wind: effectiveWind,
+    hazardChance,
+    hazards: [] // filled by hazard engine later
   };
 }
