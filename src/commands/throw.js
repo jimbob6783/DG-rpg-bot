@@ -1,218 +1,218 @@
 // -------------------------------------------------------------
-// /throw
-// Executes a throw using:
-// - Physics engine
-// - Weather modifiers
-// - Hazards
-// - Narration system
-// - XP & leveling
-// - Achievements
-// - Daily quest updates
-// - Course progression
+// throw.js (v1.2.0)
+// Executes a throw during a game session.
+// Integrates:
+//  - Physics Engine (skills + classes)
+//  - Cinematic Throw Engine
+//  - Narration System
+//  - Hazards + scoring updates
 // -------------------------------------------------------------
 
-import { SlashCommandBuilder, EmbedBuilder } from "discord.js";
+import {
+  SlashCommandBuilder,
+  EmbedBuilder
+} from "discord.js";
+
 import Character from "../db/models/Character.js";
-import Player from "../db/models/Player.js";
-import Inventory from "../db/models/Inventory.js";
 import GameState from "../db/models/GameState.js";
-
-import courses from "../data/courses.json" assert { type: "json" };
-import discs from "../data/discs.json" assert { type: "json" };
-import styles from "../data/styles.json" assert { type: "json" };
-
 import { simulateThrow } from "../game/physics.js";
-import { narrateThrow, narrateHoleCompletion } from "../game/narration.js";
-import { calculateXP, applyXP } from "../game/scoring.js";
-import { evaluateAchievements } from "../game/achievements.js";
-import { updateQuestProgress } from "../game/dailyQuests.js";
-import { logger } from "../config/logging.js";
+import { resolveHazards } from "../game/hazards.js";
+import { generateEnvironment } from "../game/environment.js";
+import { generateNarration } from "../game/narration.js";
+import { renderCinematicThrow } from "../advanced/cinematicThrows.js";
 
+
+// -------------------------------------------------------------
+// THROW COMMAND DEFINITION
+// -------------------------------------------------------------
 export default {
   data: new SlashCommandBuilder()
     .setName("throw")
-    .setDescription("Throw your disc toward the basket.")
-    .addStringOption(opt =>
-      opt.setName("style")
-         .setDescription("Choose your throwing style")
-         .setRequired(true)
-         .addChoices(...styles.map(s => ({ name: s.name, value: s.id })))
+    .setDescription("Throw your disc in the current hole.")
+    .addIntegerOption(option =>
+      option
+        .setName("power")
+        .setDescription("Throw power (1–100)")
+        .setRequired(true)
     )
-    .addIntegerOption(opt =>
-      opt.setName("power")
-         .setDescription("Throw power (1–100)")
-         .setRequired(true)
+    .addStringOption(option =>
+      option
+        .setName("style")
+        .setDescription("Throwing style")
+        .setRequired(false)
+        .addChoices(
+          { name: "Flat", value: "flat" },
+          { name: "Hyzer", value: "hyzer" },
+          { name: "Anhyzer", value: "anhyzer" },
+          { name: "Roller", value: "roller" },
+          { name: "Power Drive", value: "power" }
+        )
     ),
 
+  // -------------------------------------------------------------
+  // EXECUTE THROW
+  // -------------------------------------------------------------
   async execute(interaction) {
+
+    // ----------------------------------------------------------------
+    // FETCH PLAYER + GAME STATE
+    // ----------------------------------------------------------------
     const userId = interaction.user.id;
-    const power = interaction.options.getInteger("power");
-    const styleId = interaction.options.getString("style");
-
-    if (power < 1 || power > 100) {
-      return interaction.reply({
-        content: "❌ Power must be between **1 and 100**.",
-        ephemeral: true
-      });
-    }
-
-    // ---------------------------------------------------------
-    // LOAD PLAYER STATE
-    // ---------------------------------------------------------
     const character = await Character.findOne({ userId });
-    const player = await Player.findOne({ userId });
-    const inventory = await Inventory.findOne({ userId });
-    const state = await GameState.findOne({ userId });
+    const gameState = await GameState.findOne({ userId });
 
-    if (!character || !state) {
-      return interaction.reply({
-        content: "❌ You must start a course first using **/play**.",
-        ephemeral: true
-      });
-    }
+    if (!character)
+      return interaction.reply("❌ You must create a character first using `/create`.");
 
-    const course = courses[state.courseName];
-    const hole = course.holes[state.holeIndex];
+    if (!gameState)
+      return interaction.reply("❌ You are not in a game. Use `/play` to start a round.");
 
-    const discName = character.equippedDisc;
-    const disc = discs.find(d => d.name === discName);
+    // ----------------------------------------------------------------
+    // THROW PARAMETERS
+    // ----------------------------------------------------------------
+    const power = interaction.options.getInteger("power");
+    if (power < 1 || power > 100)
+      return interaction.reply("❌ Power must be between **1–100**.");
 
-    const style = styles.find(s => s.id === styleId);
+    const styleId = interaction.options.getString("style") || "flat";
 
-    // ---------------------------------------------------------
-    // PERFORM THROW
-    // ---------------------------------------------------------
+    const stylePresets = {
+      flat: { id: "flat", powerMultiplier: 1.0, accuracyPenalty: 0 },
+      hyzer: { id: "hyzer", powerMultiplier: 0.95, accuracyPenalty: -1 },
+      anhyzer: { id: "anhyzer", powerMultiplier: 0.95, accuracyPenalty: 1 },
+      roller: { id: "roller", powerMultiplier: 1.15, accuracyPenalty: 2 },
+      power: { id: "power", powerMultiplier: 1.2, accuracyPenalty: 3 }
+    };
+
+    const style = stylePresets[styleId];
+
+    // DISC SELECTION (for now use gameState.selectedDisc)
+    const disc = gameState.selectedDisc;
+    if (!disc)
+      return interaction.reply("❌ You must equip a disc first using `/equip`.");
+
+    // ENVIRONMENT for this hole
+    const env = gameState.environment || generateEnvironment();
+    gameState.environment = env;
+
+
+    // ----------------------------------------------------------------
+    // RUN THE PHYSICS ENGINE
+    // ----------------------------------------------------------------
     const result = simulateThrow(
       character,
       disc,
       style,
-      state.environments,
+      env,
       power,
-      state.distanceRemaining
+      gameState.distanceRemaining
     );
 
-    // Remaining distance
-    let newDistance = state.distanceRemaining - result.distance;
-    const hazards = result.hazards;
+    // Update position
+    gameState.distanceRemaining -= result.distance;
+    if (gameState.distanceRemaining < 0) gameState.distanceRemaining = 0;
 
-    // Penalties for OB, wildlife, etc.
-    let addedStrokes = hazards.filter(h => h.penalty).reduce((a, b) => a + b.penalty, 0);
+    // Increase stroke count
+    gameState.strokeCount += 1;
 
-    // Check if hole is completed
-    let holeCompleted = false;
 
-    if (newDistance <= 0) {
-      holeCompleted = true;
-      newDistance = 0;
+    // ----------------------------------------------------------------
+    // HAZARD RESOLUTION
+    // ----------------------------------------------------------------
+    resolveHazards(result.hazards, gameState);
+
+
+    // ----------------------------------------------------------------
+    // CINEMATIC FLIGHT (Patch 2)
+    // ----------------------------------------------------------------
+    const cinematicArt = renderCinematicThrow(result, disc, env);
+
+
+    // ----------------------------------------------------------------
+    // NARRATION SYSTEM
+    // ----------------------------------------------------------------
+    const narrationText = generateNarration(
+      result,
+      env,
+      disc,
+      style
+    );
+
+
+    // ----------------------------------------------------------------
+    // HOLE COMPLETION CHECK
+    // ----------------------------------------------------------------
+    let holeCompletionText = "";
+
+    if (gameState.distanceRemaining <= 0) {
+      const strokes = gameState.strokeCount;
+      const par = gameState.par;
+
+      if (strokes === par - 2) holeCompletionText = "🦅 **Eagle! Incredible!**";
+      else if (strokes === par - 1) holeCompletionText = "🐦 **Birdie!**";
+      else if (strokes === par) holeCompletionText = "⛳ **Par. Solid!**";
+      else if (strokes === par + 1) holeCompletionText = "☝️ **Bogey. Keep at it!**";
+      else holeCompletionText = "😬 **Double Bogey+**";
+
+      // Prepare for next hole
+      gameState.holeCompleted = true;
     }
 
-    // ---------------------------------------------------------
-    // UPDATE SCORE & STATE
-    // ---------------------------------------------------------
-    state.distanceRemaining = newDistance;
-    state.strokes += 1 + addedStrokes; // stroke + hazard penalties
 
-    // Track hazards on this hole
-    if (hazards.length > 0) {
-      hazards.forEach(h => state.hazardsTriggered.push(h.type));
-    }
+    // ----------------------------------------------------------------
+    // SAVE GAMESTATE UPDATE
+    // ----------------------------------------------------------------
+    await gameState.save();
 
-    await state.save();
 
-    // ---------------------------------------------------------
-    // NARRATION EMBED
-    // ---------------------------------------------------------
-    const narration = narrateThrow(result, state.environments, disc, style);
-
+    // ----------------------------------------------------------------
+    // BUILD EMBED
+    // ----------------------------------------------------------------
     const embed = new EmbedBuilder()
-      .setTitle(`Throw Result — Hole ${state.holeIndex + 1}`)
-      .setDescription(narration)
+      .setTitle(`🎯 Throw Result — Hole ${gameState.holeNumber}`)
       .setColor("#00A8FF")
+      .setDescription(cinematicArt)
       .addFields(
-        { name: "Distance Remaining", value: `${newDistance} ft`, inline: true },
-        { name: "Total Strokes", value: `${state.strokes}`, inline: true }
+        {
+          name: "🛫 Distance Thrown",
+          value: `${result.distance} ft`,
+          inline: true
+        },
+        {
+          name: "↔️ Deviation",
+          value: `${result.deviation.toFixed(2)}`,
+          inline: true
+        },
+        {
+          name: "🌬️ Wind",
+          value: `${env.windSpeed} mph ${env.windDir}`,
+          inline: true
+        },
+        {
+          name: "📏 Distance Remaining",
+          value: `${gameState.distanceRemaining} ft`,
+          inline: false
+        }
       );
 
-    await interaction.reply({ embeds: [embed] });
-
-    // ---------------------------------------------------------
-    // IF HOLE NOT COMPLETED → END HERE
-    // ---------------------------------------------------------
-    if (!holeCompleted) return;
-
-    // ---------------------------------------------------------
-    // HOLE COMPLETION
-    // ---------------------------------------------------------
-    const par = hole.par;
-    const strokes = state.strokes;
-    const rating = narrateHoleCompletion(strokes, par);
-
-    // XP earned
-    const xp = calculateXP(strokes, par);
-    const leveledUp = applyXP(character, xp);
-
-    await character.save();
-
-    // Achievements
-    const newAchievements = evaluateAchievements(player, character, result);
-    player.achievements.push(...newAchievements);
-    await player.save();
-
-    // Daily quest progress
-    const questProgress = updateQuestProgress(player, result);
-    player.dailyQuestProgress += questProgress;
-    await player.save();
-
-    // Send hole completion summary
-    const holeEmbed = new EmbedBuilder()
-      .setTitle(`🏁 Hole ${state.holeIndex + 1} Completed!`)
-      .setDescription(`
-${rating}
-
-**Strokes:** ${strokes}  
-**Par:** ${par}  
-**XP Earned:** ${xp}  
-${leveledUp ? "🎉 **LEVEL UP!**" : ""}
-${newAchievements.length ? `🏅 New Achievements: ${newAchievements.join(", ")}` : ""}
-`)
-      .setColor("#FFD700");
-
-    await interaction.followUp({ embeds: [holeEmbed] });
-
-    // ---------------------------------------------------------
-    // MOVE TO NEXT HOLE
-    // ---------------------------------------------------------
-    state.holeIndex++;
-
-    // End of course?
-    if (state.holeIndex >= course.holes.length) {
-      await state.delete();
-
-      return interaction.followUp(`
-🎉 **Course Complete!**
-Total Strokes: **${strokes}**
-Use **/play** to start another round!
-`);
+    if (result.hazards.length > 0) {
+      embed.addFields({
+        name: "⚠️ Hazard",
+        value: result.hazards[0].type.toUpperCase(),
+        inline: false
+      });
     }
 
-    // Reset for next hole
-    const nextHole = course.holes[state.holeIndex];
+    if (narrationText)
+      embed.addFields({ name: "📣 Commentary", value: narrationText });
 
-    state.strokes = 0;
-    state.distanceRemaining = nextHole.distance;
-    state.hazardsTriggered = [];
-    state.environments = {
-      ...state.environments,
-      // Update weather for new hole
-      ...(Math.random() > 0.5 ? {} : { windSpeed: Math.floor(Math.random() * 26) })
-    };
+    if (holeCompletionText)
+      embed.addFields({ name: "🏁 Hole Result", value: holeCompletionText });
 
-    await state.save();
 
-    return interaction.followUp(`
-➡ **Next Hole:** Hole ${state.holeIndex + 1}  
-Distance: **${nextHole.distance} ft**, Par ${nextHole.par}
-Use **/throw** to continue the round!
-`);
+    // ----------------------------------------------------------------
+    // REPLY
+    // ----------------------------------------------------------------
+    return interaction.reply({ embeds: [embed] });
   }
 };
