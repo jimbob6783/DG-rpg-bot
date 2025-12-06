@@ -1,0 +1,37 @@
+[
+  {
+    "name": "WindSpire Putter",
+    "speed": 2,
+    "glide": 3,
+    "stability": 0,
+    "price": 0
+  },
+  {
+    "name": "OakRunner Midrange",
+    "speed": 4,
+    "glide": 4,
+    "stability": 1,
+    "price": 50
+  },
+  {
+    "name": "SkyHammer Driver",
+    "speed": 9,
+    "glide": 4,
+    "stability": -1,
+    "price": 120
+  },
+  {
+    "name": "ThunderClap Overstable",
+    "speed": 11,
+    "glide": 3,
+    "stability": 3,
+    "price": 150
+  },
+  {
+    "name": "SolarFlare Distance Driver",
+    "speed": 13,
+    "glide": 5,
+    "stability": -2,
+    "price": 200
+  }
+]
