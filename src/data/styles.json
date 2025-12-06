@@ -1,0 +1,32 @@
+[
+  {
+    "id": "flat",
+    "name": "Flat Release",
+    "powerMultiplier": 1.0,
+    "accuracyPenalty": 0
+  },
+  {
+    "id": "hyzer",
+    "name": "Hyzer",
+    "powerMultiplier": 0.9,
+    "accuracyPenalty": -5
+  },
+  {
+    "id": "anhyzer",
+    "name": "Anhyzer",
+    "powerMultiplier": 1.1,
+    "accuracyPenalty": -10
+  },
+  {
+    "id": "power",
+    "name": "Full Power Drive",
+    "powerMultiplier": 1.25,
+    "accuracyPenalty": -15
+  },
+  {
+    "id": "roller",
+    "name": "Roller Shot",
+    "powerMultiplier": 1.3,
+    "accuracyPenalty": -25
+  }
+]
