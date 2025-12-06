@@ -26,6 +26,20 @@ const CharacterSchema = new mongoose.Schema({
     FOC: { type: Number, default: 1 }  // Focus → reduces randomness
   },
 
+  // PATCH 1 additions
+  skills: {
+    driving: { type: Number, default: 0 },
+    accuracy: { type: Number, default: 0 },
+    angleControl: { type: Number, default: 0 },
+    putting: { type: Number, default: 0 },
+    windManagement: { type: Number, default: 0 },
+    hazardAwareness: { type: Number, default: 0 }
+  },
+  
+  class: { type: String, default: "None" },
+  
+  skillPoints: { type: Number, default: 0 },
+
   // Currently equipped disc
   equippedDisc: {
     type: String,
