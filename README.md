@@ -1,6 +1,5 @@
 # 🥏 Disc Golf RPG Bot  
 ### A Cinematic, Hazard-Filled RPG Experience Inside Discord  
-Fully Developer-Friendly Version (with comments)
 
 This project is a full-scale RPG game built entirely inside Discord.  
 Players create characters, assign stats, buy discs, level up, and play through cinematic disc golf courses filled with hazards, wildlife, chaotic events, and brutal weather.
