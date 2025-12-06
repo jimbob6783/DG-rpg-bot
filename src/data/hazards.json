@@ -1,0 +1,10 @@
+{
+  "tree": "A tree blocks your path and knocks the disc backward.",
+  "water": "The disc splashes into a river, pond, or ocean.",
+  "ob": "Disc flies out of bounds and incurs a penalty.",
+  "rock": "A boulder deflects the disc unpredictably.",
+  "cliff": "The disc falls off a cliff edge.",
+  "wildlife": "Animals interfere with your throw.",
+  "vehicle": "Urban traffic causes disc collisions.",
+  "chaos": "A mysterious force alters the disc's path."
+}
